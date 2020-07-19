@@ -73,6 +73,7 @@ def test_get_random_inner_point():
     hex_key = h3.geo_to_h3(0, 0, 9)
     random_point = get_random_inner_point(hex_key)
     assert random_point.within(Polygon(h3.h3_to_geo_boundary(hex_key)))
+     
 
 def get_random_inner_point(hex_key:str)->Point:
     """ function to get a random point inside a hexagon
@@ -84,11 +85,11 @@ def get_random_inner_point(hex_key:str)->Point:
         Point: shapely.geometry.Point with the (x,y) pair on the hexagon 
     """    
     hex_polygon = Polygon(h3.h3_to_geo_boundary(hex_key))
-    cordinates = hex_polygon.exterior.coords
-    w_random = np.random.rand(1,7)
-    w = w_random/w_random.sum()
-    random_point = Point((cordinates.xy[0] * w).sum(), (cordinates.xy[1] * w).sum())
-    return random_point
+    minx, miny, maxx, maxy = hex_polygon.bounds
+    while True:
+        random_point = Point(random.uniform(minx, maxx), random.uniform(miny, maxy))
+        if hex_polygon.contains(random_point):
+            return random_point
     
 def get_random_time(lambda_value:float)-> float:
     return np.random.exponential(lambda_value)
@@ -100,21 +101,21 @@ def create_smother_demand_mapper(hex_cluster:List[str],
                                          ) -> Dict[Tuple[str, int], float] :
     if day_intervals == 'default':
         day_intervals_dict = {'morning': [7,10], 
-                        'mid_morning':[11,15],
-                        'afternoon':[16,18],
-                        'night':[19,22]
-                        }
+                              'mid_morning':[11,15],
+                              'afternoon':[16,18],
+                              'night':[19,22]
+                              }
     if hex_with_high_demand == 'default':                
         hex_with_high_demand_dict = {
-            'morning': 2,
+            'morning': 1,
             'mid_morning':3,
-            'afternoon':2,
-            'night':4
+            'afternoon':1,
+            'night':3
         }
     if cat_lambda_map == 'default':                
-        cat_lambda_map_dict = { 'low_demand': 300, # time in minutes
-                                'mid_demand': 90,
-                                'high_demand':50,
+        cat_lambda_map_dict = { 'low_demand': 900, # time in minutes
+                                'mid_demand': 360,
+                                'high_demand': 120,
         }
 
     demand_map_sim = {}
@@ -147,11 +148,8 @@ def create_smother_demand_mapper(hex_cluster:List[str],
                     demand_map_sim[tuple([hex,hour])] = cat_lambda_map_dict['low_demand']
     return demand_map_sim
 
-def create_simulation_log(demand_map_sim:Dict[Tuple[str, int], float], 
-                          days:int=1, 
-                          start_date = '2020-01-01') ->pd.DataFrame:
-
-    
+def create_simulation_day_log(demand_map_sim:Dict[Tuple[str, int], float], 
+                              start_date = '2020-01-01') ->pd.DataFrame:
     # create hex list
     hex_list = list(set([ hex for (hex,hour) in demand_map_sim.keys() ]))
     hour_list = list(set([ hour for (hex,hour) in demand_map_sim.keys() ]))
@@ -172,14 +170,18 @@ def create_simulation_log(demand_map_sim:Dict[Tuple[str, int], float],
             last_request[hex] = request_timestamp # update last request
             if request_timestamp <= end_time:
                 log_rows.append({'lat':request_point.x,
-                                'long':request_point.y,
-                                'timestamp': request_timestamp
+                                 'long':request_point.y,
+                                 'hex': hex,
+                                 'timestamp': request_timestamp,
                                 })
         if min(req_time for req_time in  last_request.values()) >= end_time:
             break
     log_df = pd.DataFrame(log_rows)       
     return log_df
 
+def create_simulation_log(demand_map_sim, days:int = 2, start_date = '2020-01-01'):
+    create_simulation_day_log()
+    raise NotImplemented
 
 if __name__ == "__main__":
     
@@ -187,4 +189,5 @@ if __name__ == "__main__":
     geojson_file_path = '/Users/pablo/github/predictive-vrp-example/instance_simulator/geojson/santiago.geojson'
     hex_cluster = geojson_to_hex(filename = geojson_file_path , res = 9)
     demand_map_sim = create_smother_demand_mapper(hex_cluster)
-    create_simulation_log(demand_map_sim, days = 2)
+    log_df = create_simulation_log(demand_map_sim, days = 2)
+    log_df.to_csv('sim_01.csv', index=False)
