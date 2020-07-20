@@ -105,6 +105,8 @@ def create_smother_demand_mapper(hex_cluster:List[str],
                               'afternoon':[16,18],
                               'night':[19,22]
                               }
+    else:
+        day_intervals_dict = deepcopy(day_intervals)
     if hex_with_high_demand == 'default':                
         hex_with_high_demand_dict = {
             'morning': 1,
@@ -112,11 +114,15 @@ def create_smother_demand_mapper(hex_cluster:List[str],
             'afternoon':1,
             'night':3
         }
+    else:
+        hex_with_high_demand_dict = deepcopy(hex_with_high_demand)
     if cat_lambda_map == 'default':                
         cat_lambda_map_dict = { 'low_demand': 900, # time in minutes
                                 'mid_demand': 360,
                                 'high_demand': 120,
         }
+    else:
+        cat_lambda_map_dict = deepcopy(cat_lambda_map)
 
     demand_map_sim = {}
     for day_window in day_intervals_dict.keys():
@@ -148,46 +154,77 @@ def create_smother_demand_mapper(hex_cluster:List[str],
                     demand_map_sim[tuple([hex,hour])] = cat_lambda_map_dict['low_demand']
     return demand_map_sim
 
-def create_simulation_day_log(demand_map_sim:Dict[Tuple[str, int], float], 
-                              start_date = '2020-01-01') ->pd.DataFrame:
+def create_simulation_log(demand_map_sim:Dict[Tuple[str, int], float], 
+                              start_date:[str,datetime] = '2020-01-01',
+                              days:int = 1) ->pd.DataFrame:
     # create hex list
     hex_list = list(set([ hex for (hex,hour) in demand_map_sim.keys() ]))
     hour_list = list(set([ hour for (hex,hour) in demand_map_sim.keys() ]))
     start_hour = min(hour_list)
     end_hour = max(hour_list)
-    start_timestamp = datetime.strptime(start_date,'%Y-%m-%d')
-    start_timestamp = start_timestamp.replace(hour=start_hour)
-
+    
+    if isinstance(start_date, str):
+        start_timestamp = datetime.strptime(start_date,'%Y-%m-%d')
+    elif isinstance(start_date, datetime):
+        start_timestamp = start_date
+    
     log_rows = []
-    last_request = {hex: start_timestamp for hex in hex_list } # hex: timestamp of the last registed request 
-    end_time = start_timestamp.replace(hour=end_hour, minute=59, second=59) 
-    while True:
-        for hex in hex_list:
-            lambda_value = demand_map_sim[(hex, min(last_request[hex],end_time).hour )]
-            minutes_to_add = get_random_time(lambda_value)
-            request_timestamp = last_request[hex] + timedelta(minutes=minutes_to_add) # get time 
-            request_point = get_random_inner_point(hex) # get point 
-            last_request[hex] = request_timestamp # update last request
-            if request_timestamp <= end_time:
-                log_rows.append({'lat':request_point.x,
-                                 'long':request_point.y,
-                                 'hex': hex,
-                                 'timestamp': request_timestamp,
-                                })
-        if min(req_time for req_time in  last_request.values()) >= end_time:
-            break
+    for n_day in range(days): # iterate over all days 
+        start_timestamp = start_timestamp + timedelta(days=n_day) # add days
+        start_timestamp = start_timestamp.replace(hour=start_hour)
+
+        
+        last_request = {hex: start_timestamp for hex in hex_list } # hex: timestamp of the last registed request 
+        end_time = start_timestamp.replace(hour=end_hour, minute=59, second=59) 
+        while True:
+            for hex in hex_list:
+                lambda_value = demand_map_sim[(hex, min(last_request[hex],end_time).hour )]
+                minutes_to_add = get_random_time(lambda_value)
+                request_timestamp = last_request[hex] + timedelta(minutes=minutes_to_add) # get time 
+                request_point = get_random_inner_point(hex) # get point 
+                last_request[hex] = request_timestamp # update last request
+                if request_timestamp <= end_time:
+                    log_rows.append({'lat':request_point.x,
+                                    'long':request_point.y,
+                                    'hex': hex,
+                                    'timestamp': request_timestamp,
+                                    })
+            if min(req_time for req_time in  last_request.values()) >= end_time:
+                break
     log_df = pd.DataFrame(log_rows)       
     return log_df
 
-def create_simulation_log(demand_map_sim, days:int = 2, start_date = '2020-01-01'):
-    create_simulation_day_log()
-    raise NotImplemented
 
 if __name__ == "__main__":
     
     #1. fill geojson 
     geojson_file_path = '/Users/pablo/github/predictive-vrp-example/instance_simulator/geojson/santiago.geojson'
     hex_cluster = geojson_to_hex(filename = geojson_file_path , res = 9)
-    demand_map_sim = create_smother_demand_mapper(hex_cluster)
-    log_df = create_simulation_log(demand_map_sim, days = 2)
-    log_df.to_csv('sim_01.csv', index=False)
+    #2. create mapper simulation week
+    demand_map_sim_weekday = create_smother_demand_mapper(hex_cluster)
+    #2.1 create mapper simulation weekend 
+    hex_with_high_demand = {'morning': 1,
+                            'mid_morning':2,
+                            'afternoon':1,
+                            'night':0
+    }
+    cat_lambda_map = { 'low_demand': 1000, # time in minutes
+                        'mid_demand': 400,
+                        'high_demand': 200,
+    }
+    demand_map_sim_weekend = create_smother_demand_mapper(hex_cluster, 
+                                                          hex_with_high_demand=hex_with_high_demand,
+                                                          cat_lambda_map = cat_lambda_map)
+    # create 12 weeks of data 
+    start_date = datetime(year=2020,month=1,day=1)
+    daily_log_list = []
+    for date_day in (start_date + timedelta(n) for n in range(84)):
+        print(f'doing {date_day}')
+        if date_day.weekday() <= 4: # weekday  
+            log_df = create_simulation_log(demand_map_sim_weekday, start_date=date_day , days = 1)
+        else:
+            log_df = create_simulation_log(demand_map_sim_weekend, start_date=date_day , days = 1)
+        daily_log_list.append(log_df)
+    # export simulation to csv
+    final_log_df = pd.concat(daily_log_list)
+    final_log_df.to_csv('sim_santiago_01.csv', index=False)
