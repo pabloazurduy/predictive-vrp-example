@@ -227,4 +227,4 @@ if __name__ == "__main__":
         daily_log_list.append(log_df)
     # export simulation to csv
     final_log_df = pd.concat(daily_log_list)
-    final_log_df.to_csv('sim_santiago_01.csv', index=False)
+    final_log_df.to_csv('simulations/sim_santiago_01.csv', index=False)
